@@ -1,7 +1,33 @@
-﻿import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 const categories = ['餐飲', '交通', '購物', '薪資', '其他']
+const storageKey = 'my-money-tracker-transactions'
+
+function loadTransactions() {
+  try {
+    const saved = localStorage.getItem(storageKey)
+    if (saved === null) return []
+    const data = JSON.parse(saved)
+    if (!Array.isArray(data) || !data.every((item) => (
+      item !== null && typeof item === 'object' &&
+      typeof item.id === 'string' && item.id.trim() !== '' &&
+      ['income', 'expense'].includes(item.type) &&
+      typeof item.amount === 'string' &&
+      Number.isSafeInteger(item.cents) && item.cents > 0 &&
+      categories.includes(item.category) &&
+      typeof item.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
+      Number.isFinite(Date.parse(`${item.date}T00:00:00Z`)) &&
+      new Date(`${item.date}T00:00:00Z`).toISOString().slice(0, 10) === item.date &&
+      typeof item.note === 'string'
+    )) || new Set(data.map((item) => item.id)).size !== data.length) return []
+    return data
+  } catch {
+    // 無效資料或瀏覽器禁止存取時，安全回到空白狀態。
+    return []
+  }
+}
+
 const money = new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 2 })
 function today() {
   const now = new Date()
@@ -9,10 +35,18 @@ function today() {
 }
 
 function App() {
-  const [transactions, setTransactions] = useState([])
+  const [transactions, setTransactions] = useState(loadTransactions)
   const [form, setForm] = useState({ type: 'expense', amount: '', category: '餐飲', date: today(), note: '' })
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(transactions))
+    } catch {
+      // 儲存失敗時，仍允許繼續使用目前的記帳功能。
+      console.warn('交易資料無法保存至此瀏覽器，重新整理後可能遺失。')
+    }
+  }, [transactions])
   const month = today().slice(0, 7)
   const monthly = transactions.filter((item) => item.date.slice(0, 7) === month)
   // 金額以「分」儲存，減少小數加總的浮點誤差。
@@ -65,7 +99,7 @@ function App() {
             <div className="form-row"><div><label htmlFor="category">分類</label><select id="category" name="category" value={form.category} onChange={updateForm}>{categories.map((category) => <option key={category}>{category}</option>)}</select></div><div><label htmlFor="date">日期</label><input id="date" name="date" type="date" required value={form.date} onChange={updateForm} /></div></div>
             <label htmlFor="note">備註 <small>選填</small></label><textarea id="note" name="note" rows="3" maxLength="300" placeholder="這筆交易的小細節…" value={form.note} onChange={updateForm} />
             {error && <p className="error" role="alert">{error}</p>}<button className="submit" type="submit">＋ 新增交易</button>
-          </form><p className="memory-note">資料僅暫存於記憶體，重新整理後會清除。</p>
+          </form><p className="memory-note">資料儲存於此瀏覽器，重新整理後仍會保留。</p>
         </section>
         <section className="panel records" aria-labelledby="records-title"><div className="records-heading"><h2 id="records-title">交易紀錄 <span className="count">{transactions.length} 筆</span></h2><p className="subtitle">所有日期的紀錄，依日期由新到舊排列。</p></div><p className="status" role="status">{message}</p>
           {transactions.length === 0 ? <div className="empty"><span aria-hidden="true">▤</span><h3>你的第一筆，從這裡開始</h3><p>新增一筆收入或支出，<br />讓每一筆金錢流向都有跡可循。</p></div> : <div className="table-scroll"><table><caption className="sr-only">所有交易紀錄</caption><thead><tr>{['日期', '類型', '分類', '金額', '備註', '操作'].map((label) => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{sorted.map((item) => <tr key={item.id}><td>{item.date}</td><td><span className={`type-badge ${item.type}`}>{item.type === 'income' ? '收入' : '支出'}</span></td><td>{item.category}</td><td className={`amount ${item.type}`}>{item.type === 'income' ? '+' : '−'}{money.format(item.cents / 100)}</td><td className="note">{item.note || '—'}</td><td><button className="delete" type="button" aria-label={`刪除 ${item.date} ${item.category} ${money.format(item.cents / 100)} 的交易`} onClick={() => deleteTransaction(item)}>刪除</button></td></tr>)}</tbody></table></div>}
